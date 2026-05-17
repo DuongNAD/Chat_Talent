@@ -1,0 +1,52 @@
+version: "3.9"
+
+# ============================================
+# Chat_Talent V2.0 PRO — Docker Compose
+# ============================================
+# Khởi chạy: docker compose up -d
+# Dừng:      docker compose down
+# Xem logs:  docker compose logs -f
+# ============================================
+
+services:
+  # ========== DATABASE ==========
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ct_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: chat_talent
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d chat_talent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ========== CACHE & QUEUE ==========
+  redis:
+    image: redis:7-alpine
+    container_name: ct_redis
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6380:6379"   # 6380 on host → 6379 in container (tránh xung đột Redis local)
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pg_data:
+    name: ct_pg_data
+  redis_data:
+    name: ct_redis_data

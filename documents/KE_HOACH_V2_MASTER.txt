@@ -1,0 +1,56 @@
+# 🏆 CHAT_TALENT V2.0 PRO — MASTER PLAN
+
+> **Nâng cấp Enterprise-grade thu nhỏ**: Docker Compose + NestJS + pgvector + HLS Streaming + WebRTC + Auto-Updater
+
+---
+
+## 📋 Mục Lục
+
+| Phần | File | Nội Dung |
+|------|------|----------|
+| **Part 1** | `KE_HOACH_V2_PART1_ARCHITECTURE.md` | Kiến trúc tổng quan, Docker Compose, Invite-Only Auth, pgvector, cấu trúc thư mục |
+| **Part 2** | `KE_HOACH_V2_PART2_FEATURES.md` | Semantic Cache, Ollama fallback, HLS Streaming, Rust compression, WebRTC P2P, Auto-Updater |
+| **Part 3** | `KE_HOACH_V2_PART3_ROADMAP.md` | Tech Stack comparison, DB Schema hoàn chỉnh, Lộ trình 12 tuần, Verification Plan |
+| **Legacy** | `KE_HOACH_TRIEN_KHAI.md` | Kế hoạch V1.0 gốc (18 tuần) — giữ lại để tham khảo |
+
+---
+
+## 🔑 Tóm Tắt 10 Nâng Cấp Chính V1.0 → V2.0
+
+| # | Nâng Cấp | Trước (V1.0) | Sau (V2.0 PRO) |
+|---|----------|-------------|-----------------|
+| 1 | **Hạ tầng** | Cài trực tiếp OS | Docker Compose 1-click |
+| 2 | **Bảo mật** | Open registration | Invite-Only codes |
+| 3 | **Backend** | Express.js spaghetti | NestJS modules + DI |
+| 4 | **Vector DB** | SQLite-vss phân mảnh | pgvector hợp nhất |
+| 5 | **AI Cost** | Không cache | Semantic Cache → $0 |
+| 6 | **Video** | Download MP4 cục | HLS Streaming |
+| 7 | **Upload** | Server xử lý raw | Client Rust compress |
+| 8 | **UI** | Vanilla CSS chậm dev | Tailwind + shadcn/ui |
+| 9 | **Distribution** | .zip Google Drive | Auto-Updater tự cài |
+| 10 | **Voice** | Không có | WebRTC P2P call |
+
+---
+
+## ⏱️ Timeline So Sánh
+
+- **V1.0**: 18 tuần (4.5 tháng) — 7 giai đoạn tuần tự
+- **V2.0 PRO**: **12 tuần (3 tháng)** — 4 MVP song song, Docker + NestJS CLI + shadcn tăng tốc
+
+---
+
+## 🚦 Bắt Đầu Ngay
+
+```bash
+# Bước 1: Clone repo + tạo .env
+cp .env.example .env
+# Điền secrets vào .env
+
+# Bước 2: Khởi chạy hạ tầng
+docker compose up -d postgres redis
+
+# Bước 3: Scaffold NestJS
+npx -y @nestjs/cli new server --package-manager npm --skip-git
+
+# Bước 4: Start coding MVP 1!
+```

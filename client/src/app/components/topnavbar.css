@@ -1,0 +1,106 @@
+.top-navbar-pro {
+  height: 48px;
+  background: var(--nav-bg);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 0 16px;
+  user-select: none;
+  z-index: 1000;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.navbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 100%;
+  cursor: default;
+}
+
+.app-icon {
+  color: #90E0FF;
+}
+
+.app-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+
+.navbar-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+
+.nav-widget {
+  background: rgba(144, 224, 255, 0.1);
+  color: #90E0FF;
+  padding: 4px 12px;
+  border-radius: 100px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border: 1px solid rgba(144, 224, 255, 0.2);
+}
+
+.navbar-right {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  gap: 4px;
+}
+
+.nav-icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-right: 4px;
+}
+
+.nav-icon-btn:hover {
+  background: var(--icon-hover-bg);
+  color: var(--text-main);
+}
+
+.window-controls {
+  display: flex;
+  height: 100%;
+  margin-left: 8px;
+}
+
+.win-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  width: 48px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.win-btn:hover {
+  background: var(--icon-hover-bg);
+  color: var(--text-main);
+}
+
+.win-btn.close:hover {
+  background: #E81123;
+  color: #fff;
+}

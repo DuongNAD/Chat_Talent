@@ -1,0 +1,129 @@
+// ===========================================
+// Chat_Talent V2.0 PRO — Database Schema
+// ===========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========== USERS ==========
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  username     String   @unique @db.VarChar(50)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  avatarUrl    String?  @map("avatar_url") @db.VarChar(500)
+  role         UserRole @default(MEMBER)
+  createdAt    DateTime @default(now()) @map("created_at")
+  lastSeen     DateTime @default(now()) @map("last_seen")
+
+  // Relations
+  messages         Message[]
+  groupMemberships GroupMember[]
+  createdGroups    ChatGroup[]
+  inviteCodesCreated InviteCode[] @relation("CreatedBy")
+  inviteCodeUsed     InviteCode?  @relation("UsedBy")
+
+  @@map("users")
+}
+
+enum UserRole {
+  SYSTEM_ADMIN
+  ADMIN
+  MEMBER
+}
+
+// ========== INVITE CODES ==========
+model InviteCode {
+  id          String    @id @default(uuid()) @db.Uuid
+  code        String    @unique @db.VarChar(50)
+  maxUses     Int       @default(1) @map("max_uses")
+  currentUses Int       @default(0) @map("current_uses")
+  expiresAt   DateTime? @map("expires_at")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  createdById String? @map("created_by") @db.Uuid
+  createdBy   User?   @relation("CreatedBy", fields: [createdById], references: [id])
+  usedById    String? @unique @map("used_by") @db.Uuid
+  usedBy      User?   @relation("UsedBy", fields: [usedById], references: [id])
+
+  @@index([code], map: "idx_invite_code")
+  @@map("invite_codes")
+}
+
+// ========== CHAT GROUPS ==========
+model ChatGroup {
+  id        String   @id @default(uuid()) @db.Uuid
+  groupName String   @map("group_name") @db.VarChar(100)
+  metadata  Json?    @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations — optional: Đại Sảnh do hệ thống tạo, không có createdBy
+  createdById String?      @map("created_by") @db.Uuid
+  createdBy   User?        @relation(fields: [createdById], references: [id])
+  members     GroupMember[]
+  messages    Message[]
+
+  @@map("chat_groups")
+}
+
+// ========== GROUP MEMBERS ==========
+model GroupMember {
+  id       String      @id @default(uuid()) @db.Uuid
+  role     GroupRole    @default(MEMBER)
+  joinedAt DateTime    @default(now()) @map("joined_at")
+
+  // Relations
+  groupId String    @map("group_id") @db.Uuid
+  group   ChatGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId  String    @map("user_id") @db.Uuid
+  user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@map("group_members")
+}
+
+enum GroupRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+// ========== MESSAGES ==========
+model Message {
+  id          String      @id @default(uuid()) @db.Uuid
+  content     String?     @db.Text
+  messageType MessageType @default(TEXT) @map("message_type")
+  isSystem    Boolean     @default(false) @map("is_system")
+  attachments Json?       @default("[]")
+  replyToId   String?     @map("reply_to") @db.Uuid
+  createdAt   DateTime    @default(now()) @map("created_at")
+  editedAt    DateTime?   @map("edited_at")
+
+  // Relations
+  groupId  String    @map("group_id") @db.Uuid
+  group    ChatGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  senderId String    @map("sender_id") @db.Uuid
+  sender   User      @relation(fields: [senderId], references: [id])
+
+  // Self-relation for replies
+  replyTo  Message?  @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies  Message[] @relation("MessageReplies")
+
+  @@index([groupId, createdAt])
+  @@map("messages")
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  VIDEO
+  SYSTEM
+}

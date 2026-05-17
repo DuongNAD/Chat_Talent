@@ -1,0 +1,27 @@
+# ==================================================
+# Chat Talent — Cloudflare Tunnel Configuration
+# ==================================================
+# Phương thức: Named Tunnel (cần tài khoản Cloudflare)
+# Thay <YOUR_TUNNEL_ID> và <YOUR_DOMAIN> bằng giá trị thực
+#
+# Setup ban đầu (1 lần):
+#   cloudflared tunnel login
+#   cloudflared tunnel create chat-talent
+#   cloudflared tunnel route dns chat-talent chat.your-domain.com
+# ==================================================
+
+tunnel: <YOUR_TUNNEL_ID>
+credentials-file: C:\Users\DELL\.cloudflared\<YOUR_TUNNEL_ID>.json
+
+ingress:
+  # API + WebSocket → NestJS Server
+  - hostname: chat.your-domain.com
+    service: http://localhost:3000
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 10s
+      # WebSocket support (Socket.io)
+      httpHostHeader: chat.your-domain.com
+
+  # Fallback — bắt buộc phải có
+  - service: http_status:404

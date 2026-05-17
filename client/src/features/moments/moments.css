@@ -1,0 +1,218 @@
+.moments-page {
+  background: var(--app-bg);
+  padding: 40px;
+  overflow-y: auto;
+  height: 100vh;
+}
+
+.moments-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 40px;
+}
+
+.moments-title h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 8px;
+}
+
+.moments-title p {
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+.moments-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--icon-hover-bg);
+  border: 1px solid var(--border-input);
+  padding: 10px 16px;
+  border-radius: 100px;
+  width: 280px;
+}
+
+.search-bar input {
+  background: none;
+  border: none;
+  color: var(--text-main);
+  outline: none;
+  width: 100%;
+}
+
+.search-bar svg {
+  color: var(--text-dim);
+}
+
+.upload-btn {
+  background: #00E5FF;
+  color: #0A0F1A;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.upload-btn:hover {
+  background: #4dffff;
+}
+
+.moments-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.moment-card {
+  background: var(--panel-bg);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.moment-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+}
+
+.moment-media {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4/3;
+  overflow: hidden;
+}
+
+.moment-card.ai-gen-card .moment-media {
+  aspect-ratio: 3/4;
+}
+
+.moment-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  color: #FFB3DE;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid rgba(255, 179, 222, 0.3);
+  z-index: 2;
+}
+
+.play-btn-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.3);
+}
+
+.play-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 20px;
+  border: 1px solid rgba(255,255,255,0.4);
+}
+
+.moment-info {
+  padding: 20px;
+}
+
+.moment-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.moment-user .avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.user-details strong {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--text-main);
+}
+
+.user-details span {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.moment-content {
+  font-size: 0.85rem;
+  color: var(--text-darker);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.moment-stats {
+  display: flex;
+  gap: 8px;
+}
+
+.stat-btn {
+  background: var(--icon-hover-bg);
+  border: 1px solid var(--border-subtle);
+  padding: 6px 12px;
+  border-radius: 100px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.stat-btn:hover {
+  background: var(--border-hover);
+}
+
+.stat-btn.active {
+  color: #FF7E67;
+  border-color: rgba(255, 126, 103, 0.3);
+  background: rgba(255, 126, 103, 0.1);
+}
+
+/* AI GEN Card Custom Styling */
+.ai-gen-card .moment-info {
+  background: linear-gradient(180deg, rgba(144,224,255,0.1) 0%, rgba(255,179,222,0.15) 100%);
+}

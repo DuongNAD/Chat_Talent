@@ -1,0 +1,260 @@
+# 🎯 HƯỚNG DẪN KHỞI ĐỘNG DỰ ÁN — LÀM GÌ TRƯỚC?
+
+> Nguyên tắc vàng: **Chạy được trước, đẹp sau, thông minh cuối cùng.**
+
+---
+
+## Tổng Quan Thứ Tự
+
+```mermaid
+graph LR
+    A["🔧 BƯỚC 0\nChuẩn Bị Máy"] --> B["🐳 BƯỚC 1\nDocker + DB"]
+    B --> C["⚙️ BƯỚC 2\nNestJS Backend"]
+    C --> D["💬 BƯỚC 3\nChat Realtime"]
+    D --> E["🖥️ BƯỚC 4\nTauri Client"]
+    E --> F["🌐 BƯỚC 5\nCloudflare Tunnel"]
+```
+
+> Khi xong 5 bước này → bạn có **MVP hoạt động**, 2 người chat qua internet.
+> Media, AI, Games, Voice... làm SAU khi đã có nền tảng chạy ổn.
+
+---
+
+## 🔧 BƯỚC 0 — Chuẩn Bị Máy (30 phút)
+
+### Checklist cài đặt
+
+| Công cụ | Kiểm tra | Link tải |
+|---------|----------|----------|
+| **Docker Desktop** | `docker --version` | https://docker.com/products/docker-desktop |
+| **Node.js 22 LTS** | `node -v` | https://nodejs.org |
+| **Rust + Cargo** | `rustc --version` | https://rustup.rs |
+| **Git** | `git --version` | https://git-scm.com |
+
+### Cấu hình Docker Desktop
+```
+Settings → Resources:
+  - CPUs: 4 (hoặc tối đa)
+  - Memory: 4 GB
+Settings → General:
+  - ✅ Start Docker Desktop when you sign in
+```
+
+### Tạo thư mục
+```powershell
+cd e:\project\Chat_Talent
+mkdir server, client, nginx, docs, scripts
+```
+
+---
+
+## 🐳 BƯỚC 1 — Docker Compose + Database (1 ngày)
+
+**Mục tiêu**: PostgreSQL + Redis chạy ổn định.
+
+> Mọi thứ phụ thuộc vào DB. Không có DB → không có gì cả.
+
+### Việc cần làm
+
+Tạo `docker-compose.yml` (bắt đầu với 2 service):
+```yaml
+version: "3.9"
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: always
+    environment:
+      POSTGRES_DB: chat_talent
+      POSTGRES_USER: ${DB_USER:-chattalent}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-localdev123}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chattalent"]
+      interval: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 256mb
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+
+volumes:
+  pg_data:
+  redis_data:
+```
+
+Chạy + kiểm tra:
+```powershell
+docker compose up -d
+docker compose ps
+```
+
+### ✅ Xong khi
+- `docker compose ps` → 2 service `running`
+- Connect PostgreSQL `localhost:5432` OK
+- Connect Redis `localhost:6379` OK
+
+---
+
+## ⚙️ BƯỚC 2 — NestJS Backend + Auth (3 ngày)
+
+**Mục tiêu**: API server kết nối DB, Auth Invite-Only hoạt động.
+
+### Việc cần làm
+
+**2.1** Khởi tạo:
+```powershell
+cd e:\project\Chat_Talent
+npx -y @nestjs/cli new server --package-manager npm --skip-git --strict
+cd server
+npm install prisma @prisma/client
+npm install @nestjs/config @nestjs/jwt @nestjs/passport passport passport-jwt
+npm install ioredis bcryptjs class-validator class-transformer
+npm install -D @types/passport-jwt @types/bcryptjs
+npx prisma init
+```
+
+**2.2** Prisma schema → `users` + `invite_codes` → `npx prisma migrate dev`
+
+**2.3** Viết modules:
+1. `ConfigModule` → Load `.env`
+2. `DatabaseModule` → Prisma service
+3. `AuthModule` → Register (invite-only) + Login + JWT
+4. `UsersModule` → GET profile
+5. `AdminModule` → Tạo mã mời
+
+**2.4** Test:
+```powershell
+# Tạo mã mời → Đăng ký → Đăng nhập → Lấy profile
+curl http://localhost:3000/api/health
+```
+
+### ✅ Xong khi
+- Register bằng invite code → nhận JWT
+- Login → access + refresh token
+- `/api/users/me` trả về user info
+- Không có invite code → bị reject 403
+
+---
+
+## 💬 BƯỚC 3 — Chat Realtime (4 ngày)
+
+**Mục tiêu**: 2 clients nhắn tin qua Socket.io, lưu DB.
+
+> Đây là tính năng CỐT LÕI. Không có chat → không có app.
+
+### Việc cần làm
+
+**3.1** Thêm schema: `chat_groups`, `group_members`, `messages`
+
+**3.2** Cài Socket.io:
+```powershell
+npm install @nestjs/websockets @nestjs/platform-socket.io socket.io
+npm install @socket.io/redis-adapter
+```
+
+**3.3** Viết `ChatGateway`:
+- `connection` → Authenticate JWT
+- `join_group` → Join room
+- `send_message` → Save DB → Broadcast
+- `typing_start/stop` → Redis TTL 3s
+
+### ✅ Xong khi
+- 2 clients nhắn tin qua lại realtime
+- Tin nhắn lưu vào PostgreSQL
+- Typing indicator hoạt động
+- Tắt → mở lại → tin cũ vẫn còn
+
+---
+
+## 🖥️ BƯỚC 4 — Tauri Desktop Client (5 ngày)
+
+**Mục tiêu**: App `.exe` có Login + Chat UI.
+
+### Việc cần làm
+
+**4.1** Khởi tạo:
+```powershell
+cd e:\project\Chat_Talent
+npm create tauri-app@latest client -- --template react-ts --manager npm
+cd client
+npm install -D tailwindcss @tailwindcss/vite
+npx shadcn@latest init
+npx shadcn@latest add button input card avatar scroll-area
+npm install socket.io-client zustand @tanstack/react-query axios
+```
+
+**4.2** Viết UI:
+1. `LoginPage` → Form login + invite code
+2. `AppLayout` → Sidebar + ChatPanel
+3. `Sidebar` → Groups, online users
+4. `ChatPanel` → Messages + Input
+5. `MessageBubble` → Avatar + text + time
+
+**4.3** Kết nối API + Socket.io
+
+**4.4** Build:
+```powershell
+npm run tauri dev    # Dev
+npm run tauri build  # Tạo .exe
+```
+
+### ✅ Xong khi
+- Mở `.exe` → Login → Chat realtime
+- Dark mode đẹp, typing indicator hoạt động
+
+---
+
+## 🌐 BƯỚC 5 — Cloudflare Tunnel (1 ngày)
+
+**Mục tiêu**: Bạn bè truy cập từ internet.
+
+### Việc cần làm
+1. Mua domain `.xyz` trên Cloudflare (~$1/năm)
+2. Tạo Tunnel trên Cloudflare Zero Trust Dashboard
+3. Thêm `cloudflared` container vào `docker-compose.yml`
+4. Cấu hình DNS: `chat.domain.xyz → http://backend:3000`
+5. Update client URL
+
+### ✅ Xong khi
+- Bạn bè mở app → Chat qua internet với HTTPS
+
+---
+
+## 🗺️ SAU MVP — Thứ Tự Ưu Tiên Thêm Feature
+
+| Ưu tiên | Tính năng | Lý do |
+|---------|-----------|-------|
+| ⭐⭐⭐⭐⭐ | Media Upload (ảnh/video) | Bạn bè cần chia sẻ ảnh ngay |
+| ⭐⭐⭐⭐ | AI Liva cơ bản | Wow factor |
+| ⭐⭐⭐⭐ | Moments (stories) | Engagement |
+| ⭐⭐⭐ | HLS Video Streaming | Video mượt |
+| ⭐⭐⭐ | Auto-Updater | Fix bug dễ |
+| ⭐⭐ | Mini-games | Giải trí |
+| ⭐⭐ | WebRTC Voice Call | Nâng cao |
+| ⭐ | Local-First SQLite | UX tối ưu |
+| ⭐ | Ollama Local LLM | Cần GPU |
+
+---
+
+## ⏰ Ước Tính Thời Gian MVP
+
+| Bước | Thời gian | Cộng dồn |
+|------|-----------|----------|
+| Bước 0: Chuẩn bị | 0.5 ngày | 0.5 ngày |
+| Bước 1: Docker + DB | 1 ngày | 1.5 ngày |
+| Bước 2: NestJS + Auth | 3 ngày | 4.5 ngày |
+| Bước 3: Chat Realtime | 4 ngày | 8.5 ngày |
+| Bước 4: Tauri Client | 5 ngày | 13.5 ngày |
+| Bước 5: Cloudflare | 1 ngày | 14.5 ngày |
+| **TỔNG MVP** | **~3 tuần** | — |
+
+> [!TIP]
+> Sau 3 tuần bạn đã có app chạy được, gửi bạn bè test ngay để lấy động lực. Các tính năng nâng cao thêm dần trong 9 tuần còn lại.

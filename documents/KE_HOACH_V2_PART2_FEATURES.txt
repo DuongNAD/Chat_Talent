@@ -1,0 +1,436 @@
+# 🚀 KẾ HOẠCH TRIỂN KHAI V2.0 PRO — PHẦN 2: AI, MEDIA & TRẢI NGHIỆM
+
+---
+
+## 5. Semantic Caching & Fallback Local LLM
+
+### 5.1 Semantic Cache Flow (Tiết Kiệm $0 Phí API)
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant B as NestJS Backend
+    participant SC as Semantic Cache (pgvector)
+    participant RD as Redis (Hot Cache)
+    participant AI as OpenAI API
+
+    U->>B: "Có event nào sắp tới không?"
+    B->>B: Embed câu hỏi → vector
+    B->>RD: Check Redis hot cache (TTL 5min)
+    alt Cache HIT (Redis)
+        RD-->>B: Cached answer
+        B-->>U: Trả lời ngay (0ms API cost)
+    else Cache MISS
+        B->>SC: SELECT similarity > 0.95 FROM liva_semantic_cache
+        alt Semantic Match Found
+            SC-->>B: answer_text + UPDATE hit_count
+            B->>RD: SET hot cache (TTL 5min)
+            B-->>U: Trả lời (0ms API cost)
+        else No Match
+            B->>AI: gpt-4o-mini request
+            AI-->>B: Response
+            B->>SC: INSERT cache entry
+            B->>RD: SET hot cache
+            B-->>U: Streaming response
+        end
+    end
+```
+
+### 5.2 NestJS Semantic Cache Service
+
+```typescript
+// server/src/modules/liva/semantic-cache.service.ts
+@Injectable()
+export class SemanticCacheService {
+  private readonly SIMILARITY_THRESHOLD = 0.95;
+
+  constructor(
+    private prisma: PrismaService,
+    private redis: RedisService,
+    private embedding: EmbeddingService,
+  ) {}
+
+  async findCachedAnswer(question: string): Promise<string | null> {
+    // 1. Check Redis hot cache (exact match hash)
+    const hash = createHash('sha256').update(question.trim().toLowerCase()).digest('hex');
+    const hotCache = await this.redis.get(`liva:cache:${hash}`);
+    if (hotCache) return hotCache;
+
+    // 2. Check pgvector semantic cache
+    const questionVector = await this.embedding.embed(question);
+    const result = await this.prisma.$queryRaw`
+      SELECT answer_text, 1 - (question_embedding <=> ${questionVector}::vector) AS similarity
+      FROM liva_semantic_cache
+      WHERE expires_at > NOW()
+        AND 1 - (question_embedding <=> ${questionVector}::vector) > ${this.SIMILARITY_THRESHOLD}
+      ORDER BY similarity DESC
+      LIMIT 1
+    `;
+
+    if (result[0]) {
+      await this.redis.setex(`liva:cache:${hash}`, 300, result[0].answer_text);
+      return result[0].answer_text;
+    }
+    return null;
+  }
+}
+```
+
+### 5.3 Ollama Fallback (Optional — GPU Required)
+
+```typescript
+// server/src/modules/liva/liva.service.ts
+@Injectable()
+export class LivaService {
+  async chat(message: string, context: ChatContext): Promise<string> {
+    // 1. Check semantic cache first
+    const cached = await this.semanticCache.findCachedAnswer(message);
+    if (cached) return cached;
+
+    // 2. Classify intent complexity
+    const isSimpleChat = !this.requiresRAG(message) && !this.requiresTools(message);
+
+    // 3. Route to appropriate LLM
+    if (isSimpleChat && this.config.ollamaEnabled) {
+      return this.ollamaProvider.chat(message, context);  // FREE, offline
+    }
+    return this.openaiProvider.chat(message, context);     // Paid, powerful
+  }
+}
+```
+
+### 5.4 Rate Limiting & Cost Control
+
+```typescript
+// server/src/modules/liva/liva.guard.ts
+@Injectable()
+export class LivaRateLimitGuard implements CanActivate {
+  private readonly DAILY_LIMIT = 30;  // 30 câu/user/ngày
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const userId = context.switchToHttp().getRequest().user.id;
+    const key = `liva:ratelimit:${userId}:${today()}`;
+    const count = await this.redis.incr(key);
+    if (count === 1) await this.redis.expire(key, 86400);
+    if (count > this.DAILY_LIMIT) {
+      throw new TooManyRequestsException(
+        `Bạn đã dùng hết ${this.DAILY_LIMIT} câu hỏi Liva hôm nay. Quay lại ngày mai nhé! 💤`
+      );
+    }
+    return true;
+  }
+}
+```
+
+---
+
+## 6. Media Upload & HLS Streaming
+
+### 6.1 Client-Side Pre-Processing (Rust / Tauri)
+
+**Vấn đề V1.0**: Upload video 500MB raw → nghẽn băng thông, treo PC server.
+
+**V2.0**: Nén ngay trên máy người gửi bằng Rust trước khi upload.
+
+```rust
+// client/src-tauri/src/media/image_compress.rs
+use image::{DynamicImage, ImageFormat};
+
+#[tauri::command]
+pub async fn compress_image(path: String, quality: u8) -> Result<String, String> {
+    let img = image::open(&path).map_err(|e| e.to_string())?;
+
+    // Resize nếu quá lớn (max 2048px cạnh dài nhất)
+    let img = if img.width() > 2048 || img.height() > 2048 {
+        img.resize(2048, 2048, image::imageops::FilterType::Lanczos3)
+    } else {
+        img
+    };
+
+    let output_path = format!("{}.compressed.webp", path);
+    img.save_with_format(&output_path, ImageFormat::WebP)
+        .map_err(|e| e.to_string())?;
+
+    Ok(output_path)  // File giảm 5-10x kích thước
+}
+```
+
+```rust
+// client/src-tauri/src/media/video_compress.rs
+use std::process::Command;
+
+#[tauri::command]
+pub async fn compress_video(path: String) -> Result<String, String> {
+    let output = format!("{}.compressed.mp4", path);
+
+    // Dùng FFmpeg bundled hoặc system FFmpeg
+    Command::new("ffmpeg")
+        .args([
+            "-i", &path,
+            "-vcodec", "libx264",
+            "-crf", "28",           // Chất lượng OK, file nhỏ
+            "-preset", "fast",
+            "-vf", "scale='min(1280,iw)':'min(720,ih)'",
+            "-acodec", "aac",
+            "-b:a", "128k",
+            "-y", &output
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    Ok(output)
+}
+```
+
+### 6.2 HLS Streaming (BullMQ Worker + FFmpeg)
+
+**V2.0**: Video upload → Worker convert → HLS streaming (tua đến đâu tải đến đó).
+
+```typescript
+// server/src/modules/media/processors/hls-convert.processor.ts
+@Processor('media')
+export class HlsConvertProcessor {
+  @Process('convert-hls')
+  async handleConvert(job: Job<{ fileId: string; filePath: string }>) {
+    const { fileId, filePath } = job.data;
+    const outputDir = `/app/uploads/hls/${fileId}`;
+    await mkdir(outputDir, { recursive: true });
+
+    const hwaccel = process.env.FFMPEG_HWACCEL;
+
+    // Chọn encoder dựa trên hardware
+    const encoder = hwaccel === 'cuda' ? 'h264_nvenc'
+                  : hwaccel === 'qsv'  ? 'h264_qsv'
+                  : 'libx264';
+
+    const args = [
+      ...(hwaccel !== 'none' ? ['-hwaccel', hwaccel] : []),
+      '-i', filePath,
+      '-vcodec', encoder,
+      '-acodec', 'aac',
+      '-hls_time', '6',              // 6 giây mỗi segment
+      '-hls_list_size', '0',         // Giữ tất cả segments
+      '-hls_segment_filename', `${outputDir}/seg_%03d.ts`,
+      '-f', 'hls',
+      `${outputDir}/playlist.m3u8`,
+    ];
+
+    await this.runFFmpeg(args, (progress) => {
+      job.updateProgress(progress);   // Report progress realtime
+    });
+
+    // Update database với HLS URL
+    await this.mediaService.setHlsReady(fileId, `/hls/${fileId}/playlist.m3u8`);
+  }
+}
+```
+
+### 6.3 Nginx HLS Config
+
+```nginx
+# nginx/nginx.conf
+server {
+    listen 8080;
+
+    # Static media (images, thumbnails)
+    location /media/ {
+        alias /media/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # HLS streaming
+    location /hls/ {
+        alias /hls/;
+        types {
+            application/vnd.apple.mpegurl m3u8;
+            video/mp2t ts;
+        }
+        add_header Cache-Control "no-cache";
+        add_header Access-Control-Allow-Origin *;
+    }
+}
+```
+
+---
+
+## 7. WebRTC Voice/Video Call (P2P)
+
+**Killer Feature**: Server chỉ làm Signaling, voice/video truyền P2P → tốn 0 băng thông server.
+
+### 7.1 Signaling Flow
+
+```mermaid
+sequenceDiagram
+    participant A as User A (Caller)
+    participant S as NestJS Signaling
+    participant B as User B (Callee)
+
+    A->>S: call:initiate { targetUserId, type: 'voice' }
+    S->>B: call:incoming { callerId, type: 'voice' }
+    B->>S: call:accept { callId }
+    S->>A: call:accepted { callId }
+
+    Note over A,B: ICE Candidate Exchange (qua Socket.io)
+    A->>S: call:ice-candidate { candidate }
+    S->>B: call:ice-candidate { candidate }
+    B->>S: call:ice-candidate { candidate }
+    S->>A: call:ice-candidate { candidate }
+
+    Note over A,B: SDP Offer/Answer Exchange
+    A->>S: call:offer { sdp }
+    S->>B: call:offer { sdp }
+    B->>S: call:answer { sdp }
+    S->>A: call:answer { sdp }
+
+    Note over A,B: 🎉 P2P Connection Established
+    A<-->B: Direct Audio/Video Stream (STUN/TURN)
+```
+
+### 7.2 NestJS WebRTC Gateway
+
+```typescript
+// server/src/modules/webrtc/webrtc.gateway.ts
+@WebSocketGateway({ namespace: '/webrtc' })
+export class WebRTCGateway {
+  @SubscribeMessage('call:initiate')
+  async initiateCall(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { targetUserId: string; type: 'voice' | 'video' },
+  ) {
+    const callId = randomUUID();
+    const targetSocket = await this.getSocketByUserId(data.targetUserId);
+
+    if (!targetSocket) {
+      client.emit('call:error', { message: 'Người dùng đang offline' });
+      return;
+    }
+
+    // Store call state in Redis (TTL 60s for ringing)
+    await this.redis.setex(`call:${callId}`, 60, JSON.stringify({
+      callerId: client.data.userId,
+      calleeId: data.targetUserId,
+      type: data.type,
+      status: 'ringing',
+    }));
+
+    targetSocket.emit('call:incoming', { callId, callerId: client.data.userId, type: data.type });
+    client.emit('call:ringing', { callId });
+  }
+
+  @SubscribeMessage('call:ice-candidate')
+  async relayICE(client: Socket, data: { callId: string; candidate: RTCIceCandidate }) {
+    const call = await this.getCallInfo(data.callId);
+    const targetId = call.callerId === client.data.userId ? call.calleeId : call.callerId;
+    const targetSocket = await this.getSocketByUserId(targetId);
+    targetSocket?.emit('call:ice-candidate', { candidate: data.candidate });
+  }
+}
+```
+
+---
+
+## 8. Tauri UX — Local-First & Auto-Updater
+
+### 8.1 Local-First Database (Zero-Latency UI)
+
+```typescript
+// client/src/services/local-db.ts
+import Database from '@tauri-apps/plugin-sql';
+
+class LocalDB {
+  private db: Database;
+
+  async init() {
+    this.db = await Database.load('sqlite:chattalent_local.db');
+    await this.db.execute(`
+      CREATE TABLE IF NOT EXISTS messages_cache (
+        id TEXT PRIMARY KEY,
+        group_id TEXT NOT NULL,
+        sender_id TEXT NOT NULL,
+        content TEXT,
+        message_type TEXT DEFAULT 'text',
+        created_at TEXT NOT NULL,
+        synced INTEGER DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_msg_group ON messages_cache(group_id, created_at);
+    `);
+  }
+
+  async cacheMessages(groupId: string, messages: Message[]) {
+    const stmt = `INSERT OR REPLACE INTO messages_cache VALUES (?, ?, ?, ?, ?, ?, 1)`;
+    for (const msg of messages) {
+      await this.db.execute(stmt, [msg.id, groupId, msg.senderId, msg.content, msg.type, msg.createdAt]);
+    }
+  }
+
+  async getCachedMessages(groupId: string, limit = 50): Promise<Message[]> {
+    return this.db.select(
+      `SELECT * FROM messages_cache WHERE group_id = ? ORDER BY created_at DESC LIMIT ?`,
+      [groupId, limit]
+    );
+  }
+}
+```
+
+```typescript
+// client/src/hooks/useMessages.ts — TanStack Query + Local-First
+export function useMessages(groupId: string) {
+  return useQuery({
+    queryKey: ['messages', groupId],
+    queryFn: async () => {
+      // 1. Return local cache IMMEDIATELY
+      const cached = await localDB.getCachedMessages(groupId);
+      // 2. Fetch new from server in background
+      const fresh = await api.getMessages(groupId, { after: cached[0]?.createdAt });
+      if (fresh.length) await localDB.cacheMessages(groupId, fresh);
+      return [...fresh, ...cached];
+    },
+    placeholderData: () => localDB.getCachedMessages(groupId), // Show instantly
+    staleTime: 10_000,
+  });
+}
+```
+
+### 8.2 Tauri Auto-Updater
+
+```json5
+// client/src-tauri/tauri.conf.json (trích đoạn)
+{
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://chat.yourdomain.com/api/updates/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ..."
+    }
+  }
+}
+```
+
+```typescript
+// server/src/modules/admin/update.controller.ts
+@Controller('api/updates')
+export class UpdateController {
+  @Get(':target/:arch/:currentVersion')
+  async checkUpdate(
+    @Param('target') target: string,
+    @Param('currentVersion') currentVersion: string,
+  ) {
+    const latest = await this.getLatestRelease(target);
+    if (semver.gt(latest.version, currentVersion)) {
+      return {
+        version: latest.version,
+        url: latest.downloadUrl,      // Serve from Nginx
+        signature: latest.signature,
+        notes: latest.releaseNotes,
+      };
+    }
+    return new HttpException('No update', HttpStatus.NO_CONTENT);
+  }
+}
+```
+
+**Flow**: Push update lên Nginx `/releases/` → App tự detect → Pop-up "Có bản mới!" → Tự cài ngầm → Restart.

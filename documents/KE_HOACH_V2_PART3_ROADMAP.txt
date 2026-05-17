@@ -1,0 +1,327 @@
+# 🚀 KẾ HOẠCH TRIỂN KHAI V2.0 PRO — PHẦN 3: TECH STACK, LỘ TRÌNH & QUYẾT ĐỊNH
+
+---
+
+## 9. Technology Stack V2.0 — So Sánh Nâng Cấp
+
+| Layer | V1.0 | V2.0 PRO | Lý Do Nâng Cấp |
+|-------|------|----------|-----------------|
+| **Hạ tầng** | Cài trực tiếp lên OS | **Docker Compose** | 1 lệnh start/stop, backup volume, migrate dễ |
+| **Backend** | Express.js | **NestJS** | Module architecture, DI, Guards, chống spaghetti code |
+| **Database** | PostgreSQL 16 + Prisma | PostgreSQL 16 + **pgvector** + Prisma | Vector search cùng DB, hybrid RAG SQL |
+| **Vector Store** | SQLite-vss / File-based | **pgvector (hợp nhất)** | Không phân mảnh, 1 DB duy nhất |
+| **AI Model** | gpt-4o | **gpt-4o-mini + Ollama fallback** | Giảm chi phí 90%, offline chat miễn phí |
+| **AI Caching** | Không có | **Semantic Cache (pgvector + Redis)** | Câu hỏi tương tự → $0 API cost |
+| **Video** | Download MP4 nguyên cục | **HLS Streaming (.m3u8)** | Tua đến đâu tải đến đó, mượt như YouTube |
+| **FFmpeg** | CPU software | **Hardware Accel (NVENC/QSV)** | Không vắt kiệt CPU |
+| **Upload** | Server-side processing | **Client-side Rust pre-processing** | Giảm 5-10x bandwidth upload |
+| **UI Styling** | Vanilla CSS | **Tailwind CSS + shadcn/ui** | Dev nhanh, Dark Mode, Accessibility built-in |
+| **Local Storage** | Không có | **tauri-plugin-sql (SQLite)** | Zero-latency UI, offline-first |
+| **Distribution** | .zip qua Google Drive | **Tauri Auto-Updater** | Push update → app tự cài ngầm |
+| **Auth** | Open registration | **Invite-Only codes** | Chống bot spam, kiểm soát truy cập |
+| **Voice/Video** | Không có | **WebRTC P2P** | Voice chat, 0 bandwidth server |
+| **Process Manager** | PM2 | **Docker restart: always** | Container-native, không cần PM2 |
+| **Tunnel** | cloudflared service | **cloudflared container** | Cùng stack Docker, quản lý đồng nhất |
+| **Ngôn ngữ UI** | Chưa quyết | **100% Tiếng Việt** | GenZ/thân thiện, gần gũi nhóm bạn |
+
+---
+
+## 10. Database Schema Hoàn Chỉnh V2.0
+
+```mermaid
+erDiagram
+    users {
+        uuid id PK
+        varchar username UK
+        varchar password_hash
+        varchar avatar_url
+        varchar role "system_admin | admin | member"
+        timestamp created_at
+        timestamp last_seen
+    }
+
+    invite_codes {
+        uuid id PK
+        varchar code UK
+        uuid created_by FK
+        uuid used_by FK
+        int max_uses
+        int current_uses
+        timestamp expires_at
+        boolean is_active
+        timestamp created_at
+    }
+
+    chat_groups {
+        uuid id PK
+        varchar group_name
+        jsonb metadata
+        uuid created_by FK
+        timestamp created_at
+    }
+
+    group_members {
+        uuid id PK
+        uuid group_id FK
+        uuid user_id FK
+        varchar role "owner | admin | member"
+        timestamp joined_at
+    }
+
+    messages {
+        uuid id PK
+        uuid group_id FK
+        uuid sender_id FK
+        text content
+        varchar message_type "text | image | file | video | system"
+        boolean is_system
+        jsonb attachments
+        uuid reply_to FK
+        timestamp created_at
+        timestamp edited_at
+    }
+
+    media_files {
+        uuid id PK
+        uuid uploaded_by FK
+        varchar original_name
+        varchar storage_path
+        varchar hls_path "nullable - set after HLS convert"
+        varchar thumbnail_path
+        varchar mime_type
+        bigint file_size
+        varchar status "uploading | processing | ready | failed"
+        jsonb metadata
+        timestamp created_at
+    }
+
+    moments {
+        uuid id PK
+        uuid user_id FK
+        uuid media_id FK
+        text caption
+        timestamp expires_at
+        timestamp created_at
+    }
+
+    moment_reactions {
+        uuid id PK
+        uuid moment_id FK
+        uuid user_id FK
+        varchar emoji
+        timestamp created_at
+    }
+
+    events {
+        uuid id PK
+        uuid group_id FK
+        uuid created_by FK
+        varchar title
+        text description
+        timestamp start_time
+        timestamp end_time
+        varchar status "upcoming | active | completed"
+        timestamp created_at
+    }
+
+    event_rsvps {
+        uuid id PK
+        uuid event_id FK
+        uuid user_id FK
+        varchar response "going | maybe | declined"
+    }
+
+    document_embeddings {
+        uuid id PK
+        varchar source_type "drive_file | message | moment"
+        uuid source_id
+        int chunk_index
+        text content
+        vector embedding "vector(1536)"
+        jsonb metadata
+        timestamp created_at
+    }
+
+    liva_conversations {
+        uuid id PK
+        uuid user_id FK
+        uuid group_id FK
+        jsonb messages_history
+        timestamp created_at
+    }
+
+    liva_semantic_cache {
+        uuid id PK
+        vector question_embedding "vector(1536)"
+        text question_text
+        text answer_text
+        jsonb metadata
+        int hit_count
+        timestamp created_at
+        timestamp expires_at
+    }
+
+    users ||--o{ invite_codes : creates
+    users ||--o{ messages : sends
+    users ||--o{ moments : creates
+    users ||--o{ group_members : joins
+    users ||--o{ event_rsvps : responds
+    users ||--o{ media_files : uploads
+    chat_groups ||--o{ messages : contains
+    chat_groups ||--o{ group_members : has
+    chat_groups ||--o{ events : schedules
+    moments ||--o{ moment_reactions : receives
+    moments ||--|| media_files : uses
+    events ||--o{ event_rsvps : has
+    messages }o--o{ document_embeddings : indexed
+```
+
+---
+
+## 11. Chốt Phương Án "Open Questions"
+
+| Câu hỏi | Quyết định V2.0 | Chi tiết |
+|----------|-----------------|----------|
+| **Tên miền** | Mua `.xyz` hoặc `.net` trên Cloudflare Registrar | Rẻ nhất, auto-renew, DNS setup Tunnel siêu mượt |
+| **CCU (người online)** | Stack cân 500-1000 CCU | Nhóm < 50 người → hệ thống "idle". Nút thắt: upload speed mạng nhà |
+| **OpenAI Model** | `gpt-4o-mini` cho 100% | Function Calling thừa sức. **Hard Limit $5/tháng** trên Dashboard |
+| **Rate Limit** | 30 câu Liva/user/ngày | Chống spam sạch tiền API |
+| **Máy case specs** | i3/i5 Gen 8+, RAM 8GB, **SSD NVMe** | SSD bắt buộc cho DB I/O. Phân vùng riêng cho media |
+| **Backend Framework** | **NestJS** | Module + DI → code khoa học, không spaghetti |
+| **Frontend Framework** | **React 19 + Tailwind + shadcn/ui** | Component đẹp sẵn, Dark Mode, Accessibility |
+| **Ngôn ngữ UI** | **100% Tiếng Việt** | Liva system prompt: GenZ/thân thiện tiếng Việt |
+| **GPU (Optional)** | RTX 3060+ / VRAM ≥ 8GB | Ollama + Llama-3-8B offline chat miễn phí |
+
+---
+
+## 12. Lộ Trình Agile MVP — 12 Tuần
+
+```mermaid
+gantt
+    title Chat_Talent V2.0 PRO — Lộ Trình 12 Tuần
+    dateFormat YYYY-MM-DD
+    axisFormat %d/%m
+
+    section MVP 1: Nhắn Tin Cơ Bản (Tuần 1-3)
+    Docker Compose + Hạ tầng           :m1a, 2026-05-19, 5d
+    NestJS scaffold + Auth Invite-Only :m1b, after m1a, 5d
+    DB Schema + Prisma migrations      :m1c, after m1a, 3d
+    Socket.io Chat Gateway             :m1d, after m1b, 5d
+    Tauri + React UI khung chat        :m1e, after m1b, 6d
+    Cloudflare Tunnel setup            :m1f, after m1d, 2d
+
+    section MVP 2: File & Media (Tuần 4-6)
+    Rust client-side compression       :m2a, after m1e, 5d
+    Chunked Upload API                 :m2b, after m1f, 4d
+    BullMQ Worker + FFmpeg HLS         :m2c, after m2b, 6d
+    Nginx HLS streaming config         :m2d, after m2c, 2d
+    Media UI (upload, player, moments) :m2e, after m2a, 7d
+    Auto-cleanup cron job              :m2f, after m2d, 2d
+
+    section MVP 3: AI Liva (Tuần 7-9)
+    pgvector setup + embedding pipeline:m3a, after m2f, 4d
+    OpenAI integration + Function Call :m3b, after m3a, 5d
+    Semantic Cache service             :m3c, after m3b, 3d
+    RAG Google Drive pipeline          :m3d, after m3b, 5d
+    Liva UI (chat bubble, streaming)   :m3e, after m3c, 4d
+    Ollama fallback (optional)         :m3f, after m3d, 3d
+
+    section MVP 4: Polish & Ship (Tuần 10-12)
+    WebRTC Voice/Video P2P             :m4a, after m3e, 7d
+    Mini-games (Caro, Snake)           :m4b, after m3e, 5d
+    Tauri Auto-Updater                 :m4c, after m4a, 3d
+    Local-First SQLite sync            :m4d, after m4a, 3d
+    Memory leak test + Perf tuning     :m4e, after m4c, 3d
+    Packaging + Release v2.0           :m4f, after m4e, 2d
+```
+
+### Chi Tiết Từng MVP
+
+#### 🟢 MVP 1 — Nhắn Tin Cơ Bản (Tuần 1-3)
+
+| Task | Output | Thời gian |
+|------|--------|-----------|
+| Viết `docker-compose.yml` hoàn chỉnh | PostgreSQL + Redis + Nginx + cloudflared chạy 1 lệnh | 2 ngày |
+| `nest new server` + cấu hình TypeScript | NestJS project với ConfigModule, Prisma | 2 ngày |
+| Auth module: Register (Invite-Only) + Login + JWT | API bảo mật, refresh token rotation | 3 ngày |
+| Chat module: Socket.io Gateway | Join room, send/edit/delete message, typing, online status | 5 ngày |
+| Tauri + React + Tailwind + shadcn/ui scaffold | Login screen + Chat layout + Dark mode | 4 ngày |
+| Cloudflare Tunnel + Domain DNS | Truy cập từ internet qua HTTPS | 2 ngày |
+
+**✅ Deliverable**: 2 clients chat real-time qua internet. Gửi bạn bè xài thử ngay.
+
+#### 🟡 MVP 2 — File & Media (Tuần 4-6)
+
+| Task | Output | Thời gian |
+|------|--------|-----------|
+| Rust image/video compression commands | File giảm 5-10x trước khi upload | 5 ngày |
+| Chunked Upload API (NestJS) | Stream ghi disk, không buffer RAM | 4 ngày |
+| BullMQ Worker: thumbnail + HLS convert | Video → `.m3u8` + `.ts` segments | 6 ngày |
+| Nginx HLS config | Streaming video mượt mà | 2 ngày |
+| Media UI: drag-drop, progress, HLS player | Upload + xem video trong app | 5 ngày |
+| Auto-cleanup cron (xóa file hết hạn) | Không đầy ổ cứng | 2 ngày |
+
+**✅ Deliverable**: Upload video → xem streaming mượt như YouTube.
+
+#### 🟠 MVP 3 — AI Liva (Tuần 7-9)
+
+| Task | Output | Thời gian |
+|------|--------|-----------|
+| pgvector extension + embedding pipeline | Vector search cùng DB chính | 4 ngày |
+| OpenAI gpt-4o-mini + Function Calling | Tạo event, tìm tin nhắn, thống kê | 5 ngày |
+| Semantic Cache (pgvector + Redis) | Câu hỏi tương tự → $0 API cost | 3 ngày |
+| RAG: Google Drive link → chunk → embed → search | Liva trả lời dựa trên file Drive | 5 ngày |
+| Liva UI: streaming response, tool indicators | Chat với AI mượt mà | 4 ngày |
+| Rate limit: 30 câu/user/ngày + Hard limit $5 | Chống spam sạch tiền | 1 ngày |
+
+**✅ Deliverable**: "Liva, tìm file báo cáo tuần trước" → trả lời với citations.
+
+#### 🔴 MVP 4 — Giải Trí & Polish (Tuần 10-12)
+
+| Task | Output | Thời gian |
+|------|--------|-----------|
+| WebRTC Signaling Gateway | Voice/Video call P2P, 0 bandwidth server | 7 ngày |
+| Mini-games: Caro + Snake multiplayer | Chơi game trong app | 5 ngày |
+| Tauri Auto-Updater | Push update → app tự cài ngầm | 3 ngày |
+| Local-First SQLite + TanStack Query | Mở app → tin nhắn hiện ngay (0ms) | 3 ngày |
+| Memory leak test, load test, perf tuning | Hệ thống ổn định 24/7 | 3 ngày |
+| Package release v2.0 | Ship cho bạn bè | 2 ngày |
+
+**✅ Deliverable**: Sản phẩm hoàn chỉnh, auto-update, voice chat, games.
+
+---
+
+## 13. Verification Plan V2.0
+
+### Automated Tests
+- Unit tests: Jest cho NestJS services, guards, processors
+- Integration tests: Supertest cho API endpoints
+- E2E tests: Socket.io client mock + WebRTC mock
+- `npm run test` pass 100%
+
+### Manual Verification
+- [ ] `docker compose up -d` → toàn bộ stack khởi chạy < 60s
+- [ ] Register bằng invite code → chat real-time qua Cloudflare Tunnel
+- [ ] Upload video 500MB → client compress → server HLS convert → streaming mượt
+- [ ] Liva Function Calling: tạo event, tìm tin nhắn, RAG từ Drive
+- [ ] Semantic Cache: 2 user hỏi câu tương tự → cache hit
+- [ ] WebRTC voice call giữa 2 clients
+- [ ] Auto-Updater: push version mới → client tự detect + install
+- [ ] Mở app offline → tin nhắn cached hiện ngay (zero-latency)
+- [ ] Chơi Caro multiplayer real-time (latency < 200ms)
+- [ ] Server RAM ổn định < 500MB sau 24h chạy liên tục
+- [ ] `docker compose down && docker compose up -d` → recovery < 30s
+
+---
+
+## 14. Bước Đầu Tiên: Viết Docker Compose
+
+Bản thiết kế này đã **sẵn sàng để code ngay**. Bước đầu tiên cần làm:
+
+1. **Tạo `docker-compose.yml`** hoàn chỉnh (đã có template ở Part 1)
+2. **Tạo `.env`** từ `.env.example`
+3. **`docker compose up -d`** → verify PostgreSQL + Redis + Nginx chạy
+4. **`nest new server`** → scaffold NestJS project
+5. **Viết Auth module** với Invite-Only registration
+
+> 💡 **Tip**: Chạy `docker compose up -d postgres redis` trước để test DB connection, sau đó thêm dần các services khác.

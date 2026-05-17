@@ -1,0 +1,237 @@
+@import "tailwindcss";
+
+/* ========== DESIGN TOKENS ========== */
+:root {
+  --bg-primary: #0f0f14;
+  --bg-secondary: #16161e;
+  --bg-tertiary: #1e1e2a;
+  --bg-hover: #252536;
+  --bg-active: #2d2d44;
+  --accent: #6c5ce7;
+  --accent-hover: #7c6ef7;
+  --accent-glow: rgba(108, 92, 231, 0.3);
+  --text-primary: #e4e4f0;
+  --text-secondary: #8b8ba3;
+  --text-muted: #5e5e77;
+  --border: #2a2a3e;
+  --danger: #ff6b6b;
+  --success: #51cf66;
+  --online: #51cf66;
+  --typing: #ffd43b;
+
+  /* Layout & Theme Vars */
+  --app-bg: #0B0E14;
+  --panel-bg: #11141D;
+  --nav-bg: #080A10;
+  --login-bg: #0d1117;
+  --card-bg: rgba(22, 27, 34, 0.4);
+  
+  --login-card-bg: rgba(10, 15, 25, 0.6);
+  --login-input-bg: rgba(0, 0, 0, 0.4);
+  --login-label-color: rgba(255, 255, 255, 0.7);
+  --login-placeholder-color: rgba(255, 255, 255, 0.3);
+  --login-icon-color: rgba(255, 255, 255, 0.5);
+  
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-input: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.1);
+  
+  --text-main: #ffffff;
+  --text-dim: #8E96A4;
+  --text-darker: #D1D5DB;
+
+  --icon-hover-bg: rgba(255, 255, 255, 0.05);
+  --input-bg: rgba(13, 17, 23, 0.7);
+}
+
+body.light-theme {
+  --bg-primary: #f0f2f5;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f9fafb;
+  --bg-hover: #e5e7eb;
+  --bg-active: #d1d5db;
+  --text-primary: #111827;
+  --text-secondary: #4B5563;
+  --text-muted: #6B7280;
+  --border: #e5e7eb;
+  
+  --app-bg: #e5e7eb;
+  --panel-bg: #ffffff;
+  --nav-bg: #ffffff;
+  --login-bg: #e5e7eb;
+  --card-bg: rgba(255, 255, 255, 0.85);
+
+  --login-card-bg: rgba(255, 255, 255, 0.65);
+  --login-input-bg: rgba(255, 255, 255, 0.5);
+  --login-label-color: rgba(0, 0, 0, 0.7);
+  --login-placeholder-color: rgba(0, 0, 0, 0.4);
+  --login-icon-color: rgba(0, 0, 0, 0.6);
+  
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-input: rgba(0, 0, 0, 0.15);
+  --border-hover: rgba(0, 0, 0, 0.2);
+  
+  --text-main: #111827;
+  --text-dim: #4B5563;
+  --text-darker: #374151;
+
+  --icon-hover-bg: rgba(0, 0, 0, 0.05);
+  --input-bg: #ffffff;
+}
+
+/* ========== BASE STYLES ========== */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ========== SCROLLBAR ========== */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--bg-active);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ========== LAYOUT ========== */
+.app-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--app-bg);
+}
+
+.app-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  flex: 1;
+  width: 100vw;
+  background: var(--app-bg);
+  min-height: 0;
+}
+
+.main-content {
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+  background: var(--bg-primary);
+}
+
+.main-content.chat-view {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+}
+
+/* ========== SHARED ANIMATIONS ========== */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(40px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50% { box-shadow: 0 0 0 20px transparent; }
+}
+
+@keyframes onlinePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ========== SHARED COMPONENTS ========== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: fadeIn 0.15s ease;
+}
+
+.modal-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  width: 380px;
+  max-width: 90vw;
+}
+
+.modal-card h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 20px; }
+
+.online-badge {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--online);
+  margin-right: 6px;
+  animation: onlinePulse 2s infinite;
+}
+
+.error-msg {
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  color: var(--danger);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  margin-bottom: 16px;
+}
+
+/* ========== FORM ELEMENTS ========== */
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.9rem;
+  outline: none;
+  transition: all 0.15s;
+}
+
+.form-group input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* ========== RESPONSIVE ========== */
+@media (max-width: 768px) {
+  .app-layout { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+}

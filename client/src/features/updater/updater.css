@@ -1,0 +1,50 @@
+/* ========== AUTO UPDATER ========== */
+.updater-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(8px); z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn 0.3s ease;
+}
+.updater-card {
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 16px; padding: 32px; width: 400px; max-width: 90vw;
+  text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  animation: slideUp 0.3s ease;
+}
+.updater-icon {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: rgba(108,92,231,0.1); color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 20px;
+}
+.updater-icon.pulse { animation: pulse 2s infinite; }
+.updater-icon.success { background: rgba(81,207,102,0.1); color: var(--success); }
+.updater-icon.error { background: rgba(255,107,107,0.1); color: var(--danger); }
+.updater-card h3 { font-size: 1.2rem; font-weight: 700; margin-bottom: 12px; }
+.updater-card p { font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 8px; }
+.release-notes {
+  background: var(--bg-tertiary); padding: 12px; border-radius: 8px;
+  font-size: 0.8rem !important; color: var(--text-primary) !important;
+  text-align: left; max-height: 100px; overflow-y: auto;
+  margin: 16px 0 !important; white-space: pre-wrap;
+}
+.progress-bar-container {
+  height: 8px; background: var(--bg-tertiary);
+  border-radius: 4px; overflow: hidden; margin: 20px 0 10px;
+}
+.progress-bar-fill {
+  height: 100%; background: linear-gradient(90deg, var(--accent), #a29bfe);
+  transition: width 0.3s ease;
+}
+.updater-actions { display: flex; gap: 12px; margin-top: 24px; }
+.updater-btn-primary {
+  flex: 1; padding: 12px; background: var(--accent); color: white;
+  border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+}
+.updater-btn-primary:hover { background: #5a4bcf; transform: translateY(-1px); }
+.updater-btn-cancel {
+  flex: 1; padding: 12px; background: var(--bg-tertiary); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 8px; font-weight: 600;
+  cursor: pointer; transition: all 0.2s;
+}
+.updater-btn-cancel:hover { background: var(--bg-hover); }

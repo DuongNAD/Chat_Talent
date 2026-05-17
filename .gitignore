@@ -1,0 +1,30 @@
+# Environment
+.env
+.env.local
+.env.production
+
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+target/
+*.exe
+
+# Docker volumes (data persisted in Docker, not in git)
+pg_data/
+redis_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Logs
+*.log
+logs/

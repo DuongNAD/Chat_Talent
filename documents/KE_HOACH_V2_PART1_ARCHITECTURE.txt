@@ -1,0 +1,415 @@
+# 🚀 KẾ HOẠCH TRIỂN KHAI V2.0 PRO — PHẦN 1: KIẾN TRÚC & HẠ TẦNG
+
+> **Nâng cấp từ V1.0**: Enterprise-grade thu nhỏ với Docker Compose, Invite-Only Auth, pgvector, HLS Streaming, WebRTC và Auto-Updater.
+
+---
+
+## Kiến Trúc Tổng Quan V2.0
+
+```mermaid
+graph TB
+    subgraph "Internet"
+        CF["Cloudflare Tunnel<br/>WSS/HTTPS + Access Policy"]
+    end
+
+    subgraph "Docker Compose Stack (Home Server)"
+        NG["Nginx Reverse Proxy<br/>+ HLS Streaming"]
+        NEST["NestJS Backend<br/>(Gateway + Socket.io + CRON)"]
+        PG["PostgreSQL 16<br/>+ pgvector extension"]
+        RD["Redis 7<br/>(Cache + PubSub + BullMQ)"]
+        WORKER["BullMQ Workers<br/>(FFmpeg HLS + Thumbnails)"]
+        OLLAMA["Ollama Container<br/>(Llama-3-8B — Optional)"]
+        CFTUNNEL["cloudflared Container"]
+        FS["Docker Volume<br/>(Media + DB Data)"]
+    end
+
+    subgraph "External APIs"
+        OAI["OpenAI API<br/>gpt-4o-mini + Embeddings"]
+        GD["Google Drive API"]
+    end
+
+    subgraph "Tauri 2 Desktop Clients"
+        T1["Client 1<br/>(Rust pre-process + SQLite local)"]
+        T2["Client 2"]
+        T3["Client N"]
+    end
+
+    T1 & T2 & T3 -->|WSS/HTTPS| CF
+    CF --> CFTUNNEL
+    CFTUNNEL --> NG
+    NG --> NEST
+    NEST --> PG
+    NEST --> RD
+    NEST --> FS
+    NEST --> WORKER
+    NEST -->|API Call| OAI
+    NEST -->|API Call| GD
+    NEST -.->|Fallback| OLLAMA
+    WORKER --> FS
+    T1 -.->|WebRTC P2P| T2
+    NEST -.->|Signaling Server| T1
+```
+
+---
+
+## 1. Docker Compose — Toàn Bộ Hạ Tầng Trong 1 File
+
+**Vấn đề V1.0**: Cài Node, PostgreSQL, Redis, Nginx trực tiếp lên Windows gây rác máy, xung đột port, không thể backup nhanh.
+
+**V2.0**: Mọi thứ chạy trong Docker containers. `docker compose up -d` là xong.
+
+```yaml
+# docker-compose.yml
+version: "3.9"
+
+services:
+  # === DATABASE ===
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: always
+    environment:
+      POSTGRES_DB: chat_talent
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      retries: 5
+
+  # === CACHE & QUEUE ===
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  # === BACKEND ===
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/chat_talent
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      INVITE_MASTER_KEY: ${INVITE_MASTER_KEY}
+      NODE_ENV: production
+    volumes:
+      - media_data:/app/uploads
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  # === BACKGROUND WORKERS ===
+  worker:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.worker
+    restart: always
+    depends_on:
+      - redis
+      - postgres
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/chat_talent
+      REDIS_URL: redis://redis:6379
+      FFMPEG_HWACCEL: ${FFMPEG_HWACCEL:-none}
+    volumes:
+      - media_data:/app/uploads
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # === REVERSE PROXY + HLS ===
+  nginx:
+    image: nginx:alpine
+    restart: always
+    depends_on:
+      - backend
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - media_data:/media:ro
+      - hls_data:/hls:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  # === CLOUDFLARE TUNNEL ===
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN}
+
+  # === LOCAL LLM (Optional) ===
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+
+volumes:
+  pg_data:
+  redis_data:
+  media_data:
+  hls_data:
+  ollama_data:
+```
+
+```env
+# .env.example
+DB_USER=chattalent
+DB_PASSWORD=<generate-strong-password>
+JWT_SECRET=<generate-strong-secret>
+OPENAI_API_KEY=sk-...
+INVITE_MASTER_KEY=<admin-secret-to-create-invites>
+CF_TUNNEL_TOKEN=<from-cloudflare-dashboard>
+FFMPEG_HWACCEL=none  # cuda | qsv | none
+```
+
+**Lợi ích**:
+- ✅ 1 lệnh khởi chạy: `docker compose up -d`
+- ✅ Cúp điện → mở máy → `restart: always` tự start
+- ✅ Backup: copy Docker volumes → xong
+- ✅ Migrate sang máy mới: copy thư mục + `docker compose up -d`
+
+---
+
+## 2. Bảo Mật: Invite-Only Registration
+
+**Vấn đề V1.0**: `POST /api/auth/register` mở ra Internet → bot spam tạo tài khoản rác.
+
+### Database Schema Bổ Sung
+
+```sql
+-- Bảng invite_codes
+CREATE TABLE invite_codes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(50) UNIQUE NOT NULL,        -- VD: 'VIP-TALENT-2026'
+    created_by UUID REFERENCES users(id),
+    used_by UUID REFERENCES users(id),
+    max_uses INT DEFAULT 1,
+    current_uses INT DEFAULT 0,
+    expires_at TIMESTAMP,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_invite_code ON invite_codes(code) WHERE is_active = true;
+```
+
+### API Flow
+
+```
+POST /api/admin/invites          → Admin tạo mã (cần INVITE_MASTER_KEY)
+POST /api/auth/register          → Bắt buộc field "invite_code"
+  → Validate code tồn tại + chưa hết hạn + chưa đủ max_uses
+  → Tạo user → Đánh dấu code đã dùng
+  → Trả JWT tokens
+
+GET  /api/admin/invites          → Liệt kê tất cả mã (Admin only)
+DELETE /api/admin/invites/:id    → Vô hiệu hóa mã
+```
+
+---
+
+## 3. Database: Hợp Nhất Với pgvector
+
+**Vấn đề V1.0**: Dùng file-based/sqlite-vss cho RAG → phân mảnh dữ liệu.
+
+**V2.0**: Dùng `pgvector/pgvector:pg16` Docker image — embedding vectors nằm cùng DB chính.
+
+### Schema Bổ Sung Cho Vector Search
+
+```sql
+-- Bật extension
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Bảng lưu embeddings cho RAG
+CREATE TABLE document_embeddings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_type VARCHAR(20) NOT NULL,  -- 'drive_file' | 'message' | 'moment'
+    source_id UUID NOT NULL,
+    chunk_index INT NOT NULL,
+    content TEXT NOT NULL,
+    embedding vector(1536),            -- text-embedding-3-small dimension
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- HNSW index cho tìm kiếm nhanh
+CREATE INDEX idx_embedding_hnsw ON document_embeddings
+    USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
+
+-- Semantic cache cho Liva
+CREATE TABLE liva_semantic_cache (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    question_embedding vector(1536),
+    question_text TEXT NOT NULL,
+    answer_text TEXT NOT NULL,
+    metadata JSONB DEFAULT '{}',
+    hit_count INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW(),
+    expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '7 days'
+);
+
+CREATE INDEX idx_cache_hnsw ON liva_semantic_cache
+    USING hnsw (question_embedding vector_cosine_ops);
+```
+
+### Hybrid Search Query Ví Dụ
+
+```sql
+-- Tìm câu nói có ý nghĩa X của User Y vào tuần trước
+SELECT de.content, de.metadata,
+       1 - (de.embedding <=> $1::vector) AS similarity
+FROM document_embeddings de
+JOIN messages m ON de.source_id = m.id AND de.source_type = 'message'
+WHERE m.sender_id = $2                              -- User Y
+  AND m.created_at >= NOW() - INTERVAL '7 days'     -- Tuần trước
+  AND 1 - (de.embedding <=> $1::vector) > 0.78      -- Ngưỡng similarity
+ORDER BY similarity DESC
+LIMIT 10;
+```
+
+---
+
+## 4. Cấu Trúc Thư Mục V2.0
+
+```
+e:\Chat_Talent\
+├── docker-compose.yml              # ⭐ Toàn bộ hạ tầng
+├── .env                            # Secrets (gitignore)
+├── .env.example                    # Template
+│
+├── server/                         # NestJS Backend
+│   ├── Dockerfile                  # Multi-stage build
+│   ├── Dockerfile.worker           # Worker riêng
+│   ├── src/
+│   │   ├── app.module.ts
+│   │   ├── main.ts
+│   │   ├── common/                 # Guards, Pipes, Filters, Decorators
+│   │   │   ├── guards/
+│   │   │   │   ├── jwt-auth.guard.ts
+│   │   │   │   ├── roles.guard.ts
+│   │   │   │   └── invite-code.guard.ts
+│   │   │   ├── interceptors/
+│   │   │   └── filters/
+│   │   ├── modules/
+│   │   │   ├── auth/               # JWT + Invite-Only registration
+│   │   │   │   ├── auth.module.ts
+│   │   │   │   ├── auth.controller.ts
+│   │   │   │   ├── auth.service.ts
+│   │   │   │   ├── strategies/     # JWT, Refresh strategies
+│   │   │   │   └── dto/
+│   │   │   ├── users/
+│   │   │   ├── chat/               # Messages + Socket.io Gateway
+│   │   │   │   ├── chat.module.ts
+│   │   │   │   ├── chat.gateway.ts # Socket.io + WebRTC Signaling
+│   │   │   │   ├── chat.service.ts
+│   │   │   │   └── dto/
+│   │   │   ├── media/              # Upload + HLS streaming
+│   │   │   │   ├── media.module.ts
+│   │   │   │   ├── media.controller.ts
+│   │   │   │   ├── media.service.ts
+│   │   │   │   └── processors/     # BullMQ job processors
+│   │   │   │       ├── thumbnail.processor.ts
+│   │   │   │       └── hls-convert.processor.ts
+│   │   │   ├── moments/
+│   │   │   ├── events/
+│   │   │   ├── games/
+│   │   │   │   ├── games.module.ts
+│   │   │   │   ├── games.gateway.ts
+│   │   │   │   └── engines/        # Caro, Snake, 2048
+│   │   │   ├── liva/               # AI Assistant
+│   │   │   │   ├── liva.module.ts
+│   │   │   │   ├── liva.service.ts
+│   │   │   │   ├── liva.gateway.ts
+│   │   │   │   ├── semantic-cache.service.ts
+│   │   │   │   ├── rag.service.ts
+│   │   │   │   ├── tools/          # Function Calling definitions
+│   │   │   │   └── prompts/        # System prompts
+│   │   │   ├── webrtc/             # ⭐ Voice/Video Signaling
+│   │   │   │   ├── webrtc.module.ts
+│   │   │   │   └── webrtc.gateway.ts
+│   │   │   └── admin/              # Invite codes management
+│   │   ├── database/
+│   │   │   ├── prisma/
+│   │   │   │   ├── schema.prisma
+│   │   │   │   └── migrations/
+│   │   │   └── seeds/
+│   │   └── config/                 # ConfigModule schemas
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── client/                         # Tauri 2 + React + Vite
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── ui/                 # ⭐ shadcn/ui components
+│   │   │   ├── chat/
+│   │   │   ├── moments/
+│   │   │   ├── events/
+│   │   │   ├── games/
+│   │   │   ├── liva/
+│   │   │   └── voice/              # ⭐ WebRTC Voice/Video UI
+│   │   ├── hooks/
+│   │   ├── stores/                 # Zustand
+│   │   ├── services/
+│   │   │   ├── api.ts
+│   │   │   ├── socket.ts
+│   │   │   └── local-db.ts         # ⭐ tauri-plugin-sql (SQLite)
+│   │   ├── lib/                    # shadcn utils
+│   │   └── styles/
+│   ├── src-tauri/
+│   │   ├── src/
+│   │   │   ├── main.rs
+│   │   │   ├── media/              # ⭐ Rust pre-processing
+│   │   │   │   ├── image_compress.rs
+│   │   │   │   └── video_compress.rs
+│   │   │   └── commands.rs         # Tauri IPC commands
+│   │   ├── plugins/                # Auto-updater config
+│   │   ├── Cargo.toml
+│   │   └── tauri.conf.json
+│   ├── tailwind.config.ts          # ⭐ Tailwind CSS
+│   ├── components.json             # ⭐ shadcn/ui config
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── nginx/
+│   └── nginx.conf                  # HLS streaming config
+│
+├── games/                          # HTML5 mini-games
+│   ├── caro/
+│   ├── snake/
+│   └── 2048/
+│
+├── update-server/                  # ⭐ Static files cho Auto-Updater
+│   └── releases/
+│
+└── docs/
+    ├── setup-guide.md
+    └── user-manual.md
+```
